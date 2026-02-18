@@ -122,11 +122,11 @@ function selectRequest(id) {
 
     <div class="detail-row-split">
       <div class="detail-section">
-        <h4>Query</h4>
+        <h4>Query <button class="btn btn-small btn-secondary" id="copyQueryBtn">Copy</button></h4>
         <pre class="code-block code-block-small">${escapeHtml(request.query || 'N/A')}</pre>
       </div>
       <div class="detail-section">
-        <h4>Variables</h4>
+        <h4>Variables <button class="btn btn-small btn-secondary" id="copyVariablesBtn">Copy</button></h4>
         <pre class="code-block code-block-small">${formatJson(request.variables)}</pre>
       </div>
     </div>
@@ -143,17 +143,22 @@ function selectRequest(id) {
     </div>
   `;
 
-  // Add event listener for copy response button
-  const copyResponseBtn = document.getElementById('copyResponseBtn');
-  if (copyResponseBtn) {
-    copyResponseBtn.addEventListener('click', () => {
-      navigator.clipboard.writeText(JSON.stringify(request.response, null, 2));
-      copyResponseBtn.textContent = 'Copied!';
-      setTimeout(() => {
-        copyResponseBtn.textContent = 'Copy';
-      }, 1500);
-    });
-  }
+  // Add event listener for copy buttons
+  const setupCopyBtn = (btnId, text) => {
+    const btn = document.getElementById(btnId);
+    if (btn) {
+      btn.addEventListener('click', async () => {
+        const copied = await copyToClipboard(text);
+        if (copied) {
+          btn.textContent = 'Copied!';
+          setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+        }
+      });
+    }
+  };
+  setupCopyBtn('copyQueryBtn', request.query || 'N/A');
+  setupCopyBtn('copyVariablesBtn', JSON.stringify(request.variables ?? null, null, 2));
+  setupCopyBtn('copyResponseBtn', JSON.stringify(request.response, null, 2));
 
   // Add event listener for create mock rule button
   const createMockRuleBtn = document.getElementById('createMockRuleBtn');
@@ -351,6 +356,31 @@ function switchTab(tabName) {
 }
 
 // Utility functions
+async function copyToClipboard(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // navigator.clipboard.writeText fails in DevTools panel (e.g. "Document is not focused")
+  }
+  // Fallback for extension contexts using execCommand
+  const textArea = document.createElement('textarea');
+  textArea.value = text;
+  textArea.style.position = 'fixed';
+  textArea.style.left = '-999999px';
+  textArea.style.top = '-999999px';
+  document.body.appendChild(textArea);
+  textArea.focus();
+  textArea.select();
+  try {
+    return document.execCommand('copy');
+  } finally {
+    document.body.removeChild(textArea);
+  }
+}
+
 function escapeHtml(str) {
   if (!str) return '';
   return String(str)
