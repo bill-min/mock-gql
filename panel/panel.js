@@ -405,6 +405,47 @@ function formatTime(timestamp) {
   return date.toLocaleTimeString();
 }
 
+// Resizable panels
+function makeResizable(resizerId, panelId) {
+  const resizer = document.getElementById(resizerId);
+  const panel = document.getElementById(panelId);
+  if (!resizer || !panel) return;
+
+  let startX = 0;
+  let startWidth = 0;
+
+  resizer.addEventListener('mousedown', (e) => {
+    startX = e.clientX;
+    startWidth = panel.offsetWidth;
+    resizer.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    function onMouseMove(e) {
+      const delta = e.clientX - startX;
+      const newWidth = Math.max(
+        parseInt(getComputedStyle(panel).minWidth) || 150,
+        startWidth + delta
+      );
+      panel.style.width = `${newWidth}px`;
+    }
+
+    function onMouseUp() {
+      resizer.classList.remove('dragging');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    }
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  });
+}
+
+makeResizable('requestsResizer', 'requestList');
+makeResizable('mockRulesResizer', 'addRuleForm');
+
 // Event listeners
 tabs.forEach(tab => {
   tab.addEventListener('click', () => switchTab(tab.dataset.tab));

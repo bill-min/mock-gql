@@ -29,6 +29,7 @@
           <div class="request-list" id="requestList">
             <div class="empty-state">No GraphQL requests captured yet</div>
           </div>
+          <div class="resizer" id="requestsResizer"></div>
           <div class="request-detail" id="requestDetail">
             <div class="empty-state">Select a request to view details</div>
           </div>
@@ -38,7 +39,7 @@
       <!-- Mock Rules Tab -->
       <div class="tab-content" id="mock-rules-tab">
         <div class="mock-rules-container">
-          <div class="add-rule-form">
+          <div class="add-rule-form" id="addRuleForm">
             <h3>Add Mock Rule</h3>
             <div class="form-group">
               <label for="operationName">Operation Name</label>
@@ -57,6 +58,7 @@
               <button id="cancelEditBtn" class="btn btn-secondary" style="display: none;">Cancel</button>
             </div>
           </div>
+          <div class="resizer" id="mockRulesResizer"></div>
           <div class="rules-list" id="rulesList">
             <h3>Active Rules</h3>
             <div class="empty-state">No mock rules defined</div>

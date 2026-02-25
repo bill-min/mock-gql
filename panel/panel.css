@@ -173,8 +173,25 @@ body {
 
 .request-list {
   width: 300px;
-  border-right: 1px solid #3c3c3c;
+  min-width: 150px;
+  max-width: 70%;
+  flex-shrink: 0;
   overflow-y: auto;
+}
+
+/* Resizer */
+.resizer {
+  width: 4px;
+  flex-shrink: 0;
+  background: #3c3c3c;
+  cursor: col-resize;
+  transition: background 0.15s;
+  position: relative;
+}
+
+.resizer:hover,
+.resizer.dragging {
+  background: #0e639c;
 }
 
 .request-detail {
@@ -326,8 +343,10 @@ body {
 
 .add-rule-form {
   width: 350px;
+  min-width: 200px;
+  max-width: 70%;
+  flex-shrink: 0;
   padding: 16px;
-  border-right: 1px solid #3c3c3c;
 }
 
 .add-rule-form h3 {
