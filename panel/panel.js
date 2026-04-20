@@ -1,10 +1,15 @@
+const ruleUtils = window.MockGQLRuleUtils;
+
+if (!ruleUtils) {
+  throw new Error('MockGQL rule utilities are unavailable');
+}
+
 // State
 let requests = [];
 let mockRules = {};
 let mockingEnabled = false;
 let selectedRequestId = null;
-let currentTabId = null;
-let editingRule = null; // Track which rule is being edited
+let editingRuleId = null;
 
 // DOM Elements
 const requestList = document.getElementById('requestList');
@@ -15,6 +20,9 @@ const clearBtn = document.getElementById('clearBtn');
 const addRuleBtn = document.getElementById('addRuleBtn');
 const cancelEditBtn = document.getElementById('cancelEditBtn');
 const operationNameInput = document.getElementById('operationName');
+const enableVariableMatchInput = document.getElementById('enableVariableMatch');
+const variableMatchSection = document.getElementById('variableMatchSection');
+const matchVariablesInput = document.getElementById('matchVariables');
 const mockResponseInput = document.getElementById('mockResponse');
 const mockDelayInput = document.getElementById('mockDelay');
 const tabs = document.querySelectorAll('.tab');
@@ -22,11 +30,6 @@ const tabContents = document.querySelectorAll('.tab-content');
 
 // Initialize
 async function init() {
-  // Get current tab ID
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  currentTabId = tab?.id || chrome.devtools.inspectedWindow.tabId;
-
-  // Load initial state
   loadRequests();
   loadMockState();
 
@@ -41,9 +44,15 @@ async function loadRequests() {
       type: 'GET_REQUESTS',
       tabId: chrome.devtools.inspectedWindow.tabId
     });
+
     if (response?.requests) {
       requests = response.requests;
       renderRequests();
+
+      if (selectedRequestId && !requests.some((request) => request.id === selectedRequestId)) {
+        selectedRequestId = null;
+        requestDetail.innerHTML = '<div class="empty-state">Select a request to view details</div>';
+      }
     }
   } catch (e) {
     console.error('Failed to load requests:', e);
@@ -54,8 +63,9 @@ async function loadRequests() {
 async function loadMockState() {
   try {
     const response = await chrome.runtime.sendMessage({ type: 'GET_MOCK_STATE' });
+
     if (response) {
-      mockRules = response.mockRules || {};
+      mockRules = ruleUtils.normalizeMockRules(response.mockRules);
       mockingEnabled = response.mockingEnabled || false;
       mockingToggle.checked = mockingEnabled;
       renderRules();
@@ -72,7 +82,7 @@ function renderRequests() {
     return;
   }
 
-  requestList.innerHTML = requests.map(req => `
+  requestList.innerHTML = requests.map((req) => `
     <div class="request-item ${req.id === selectedRequestId ? 'selected' : ''} ${req.mocked ? 'mocked' : ''}"
          data-id="${req.id}">
       <div class="request-type ${req.operationType}">${req.operationType.charAt(0).toUpperCase()}</div>
@@ -84,8 +94,7 @@ function renderRequests() {
     </div>
   `).join('');
 
-  // Add click handlers
-  requestList.querySelectorAll('.request-item').forEach(item => {
+  requestList.querySelectorAll('.request-item').forEach((item) => {
     item.addEventListener('click', () => selectRequest(item.dataset.id));
   });
 }
@@ -93,7 +102,7 @@ function renderRequests() {
 // Select a request
 function selectRequest(id) {
   selectedRequestId = id;
-  const request = requests.find(r => r.id === id);
+  const request = requests.find((item) => item.id === id);
 
   renderRequests();
 
@@ -118,6 +127,12 @@ function selectRequest(id) {
         <span class="value">${escapeHtml(request.url)}</span>
       </div>
       ${request.mocked ? '<div class="detail-row"><span class="badge">MOCKED RESPONSE</span></div>' : ''}
+      ${request.mocked && request.mockRuleMatch ? `
+        <div class="detail-row">
+          <span class="label">Rule:</span>
+          <span class="value">${escapeHtml(request.mockRuleMatch)}</span>
+        </div>
+      ` : ''}
     </div>
 
     <div class="detail-row-split">
@@ -137,188 +152,263 @@ function selectRequest(id) {
     </div>
 
     <div class="detail-actions">
-      <button class="btn btn-secondary" id="createMockRuleBtn" data-operation="${escapeHtml(request.operationName)}">
+      <button class="btn btn-secondary" id="createMockRuleBtn">
         Create Mock Rule
       </button>
     </div>
   `;
 
-  // Add event listener for copy buttons
   const setupCopyBtn = (btnId, text) => {
     const btn = document.getElementById(btnId);
-    if (btn) {
-      btn.addEventListener('click', async () => {
-        const copied = await copyToClipboard(text);
-        if (copied) {
-          btn.textContent = 'Copied!';
-          setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
-        }
-      });
+    if (!btn) {
+      return;
     }
+
+    btn.addEventListener('click', async () => {
+      const copied = await copyToClipboard(text);
+
+      if (copied) {
+        btn.textContent = 'Copied!';
+        setTimeout(() => {
+          btn.textContent = 'Copy';
+        }, 1500);
+      }
+    });
   };
+
   setupCopyBtn('copyQueryBtn', request.query || 'N/A');
   setupCopyBtn('copyVariablesBtn', JSON.stringify(request.variables ?? null, null, 2));
   setupCopyBtn('copyResponseBtn', JSON.stringify(request.response, null, 2));
 
-  // Add event listener for create mock rule button
   const createMockRuleBtn = document.getElementById('createMockRuleBtn');
   if (createMockRuleBtn) {
     createMockRuleBtn.addEventListener('click', () => {
       operationNameInput.value = request.operationName;
+      enableVariableMatchInput.checked = false;
+      matchVariablesInput.value = '';
+      if (request.variables !== undefined) {
+        matchVariablesInput.value = JSON.stringify(request.variables, null, 2);
+      }
       mockResponseInput.value = JSON.stringify(request.response, null, 2);
-      editingRule = null;
+      mockDelayInput.value = '';
+      editingRuleId = null;
       addRuleBtn.textContent = 'Add Rule';
       cancelEditBtn.style.display = 'none';
+      syncVariableMatchState();
       switchTab('mock-rules');
+      operationNameInput.focus();
     });
   }
 }
 
+function getSortedRules() {
+  return Object.values(mockRules).sort((ruleA, ruleB) =>
+    ruleA.operationName.localeCompare(ruleB.operationName) ||
+    ruleUtils.compareRulesByPriority(ruleA, ruleB),
+  );
+}
+
 // Render mock rules
 function renderRules() {
-  const ruleNames = Object.keys(mockRules);
+  const rules = getSortedRules();
 
-  if (ruleNames.length === 0) {
+  if (rules.length === 0) {
     rulesList.innerHTML = '<h3>Active Rules</h3><div class="empty-state">No mock rules defined</div>';
     return;
   }
 
   rulesList.innerHTML = `
     <h3>Active Rules</h3>
-    ${ruleNames.map(name => {
-      const rule = mockRules[name];
+    ${rules.map((rule) => {
       const isEnabled = rule.enabled !== false;
       const delay = rule.delay || 0;
+      const matchSummary = ruleUtils.describeRuleMatch(rule, 90);
+
       return `
-      <div class="rule-item ${isEnabled ? '' : 'rule-disabled'}">
-        <div class="rule-header">
-          <label class="toggle-switch toggle-small">
-            <input type="checkbox" class="rule-toggle" data-rule="${escapeHtml(name)}" ${isEnabled ? 'checked' : ''}>
-            <span class="toggle-slider"></span>
-          </label>
-          <div class="rule-name">${escapeHtml(name)}</div>
-          ${delay > 0 ? `<span class="rule-delay">${delay}ms</span>` : ''}
+        <div class="rule-item ${isEnabled ? '' : 'rule-disabled'}">
+          <div class="rule-header">
+            <label class="toggle-switch toggle-small">
+              <input type="checkbox" class="rule-toggle" data-rule-id="${escapeHtml(rule.id)}" ${isEnabled ? 'checked' : ''}>
+              <span class="toggle-slider"></span>
+            </label>
+            <div class="rule-meta">
+              <div class="rule-name">${escapeHtml(rule.operationName)}</div>
+              <div class="rule-match">${escapeHtml(matchSummary)}</div>
+            </div>
+            ${delay > 0 ? `<span class="rule-delay">${delay}ms</span>` : ''}
+          </div>
+          ${rule.hasVariableMatcher ? `
+            <div class="rule-condition">
+              <div class="rule-condition-label">Match Variables</div>
+              <pre class="rule-condition-value">${formatJson(rule.matchVariables)}</pre>
+            </div>
+          ` : ''}
+          <pre class="rule-response">${formatJson(rule.response)}</pre>
+          <div class="rule-actions">
+            <button class="btn btn-secondary btn-small edit-rule-btn" data-rule-id="${escapeHtml(rule.id)}">Edit</button>
+            <button class="btn btn-danger btn-small delete-rule-btn" data-rule-id="${escapeHtml(rule.id)}">Delete</button>
+          </div>
         </div>
-        <pre class="rule-response">${formatJson(rule.response)}</pre>
-        <div class="rule-actions">
-          <button class="btn btn-secondary btn-small edit-rule-btn" data-rule="${escapeHtml(name)}">Edit</button>
-          <button class="btn btn-danger btn-small delete-rule-btn" data-rule="${escapeHtml(name)}">Delete</button>
-        </div>
-      </div>
-    `}).join('')}
+      `;
+    }).join('')}
   `;
 
-  // Add event listeners for toggles
-  rulesList.querySelectorAll('.rule-toggle').forEach(toggle => {
+  rulesList.querySelectorAll('.rule-toggle').forEach((toggle) => {
     toggle.addEventListener('change', () => {
-      toggleRule(toggle.dataset.rule, toggle.checked);
+      toggleRule(toggle.dataset.ruleId, toggle.checked);
     });
   });
 
-  // Add event listeners for edit buttons
-  rulesList.querySelectorAll('.edit-rule-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      editRule(btn.dataset.rule);
+  rulesList.querySelectorAll('.edit-rule-btn').forEach((button) => {
+    button.addEventListener('click', () => {
+      editRule(button.dataset.ruleId);
     });
   });
 
-  // Add event listeners for delete buttons
-  rulesList.querySelectorAll('.delete-rule-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      deleteRule(btn.dataset.rule);
+  rulesList.querySelectorAll('.delete-rule-btn').forEach((button) => {
+    button.addEventListener('click', () => {
+      deleteRule(button.dataset.ruleId);
     });
   });
 }
 
+async function persistMockRules() {
+  mockRules = ruleUtils.normalizeMockRules(mockRules);
+
+  await chrome.runtime.sendMessage({
+    type: 'UPDATE_MOCK_RULES',
+    mockRules
+  });
+}
+
+function syncVariableMatchState() {
+  variableMatchSection.classList.toggle('is-hidden', !enableVariableMatchInput.checked);
+}
+
+function resetRuleForm() {
+  operationNameInput.value = '';
+  enableVariableMatchInput.checked = false;
+  matchVariablesInput.value = '';
+  mockResponseInput.value = '';
+  mockDelayInput.value = '';
+  editingRuleId = null;
+  addRuleBtn.textContent = 'Add Rule';
+  cancelEditBtn.style.display = 'none';
+  syncVariableMatchState();
+}
+
 // Add or update mock rule
 async function addRule() {
-  const name = operationNameInput.value.trim();
-  const responseStr = mockResponseInput.value.trim();
-  const delay = parseInt(mockDelayInput.value) || 0;
+  const operationName = operationNameInput.value.trim();
+  const hasVariableMatcher = enableVariableMatchInput.checked;
+  const matchVariablesRaw = matchVariablesInput.value.trim();
+  const responseRaw = mockResponseInput.value.trim();
+  const delay = parseInt(mockDelayInput.value, 10) || 0;
 
-  if (!name) {
+  if (!operationName) {
     alert('Please enter an operation name');
     return;
   }
 
+  if (!responseRaw) {
+    alert('Please enter a mock response');
+    return;
+  }
+
+  let matchVariables = null;
   let response;
+
+  if (hasVariableMatcher && !matchVariablesRaw) {
+    alert('Please enter match variables JSON or turn off variable match');
+    return;
+  }
+
+  if (matchVariablesRaw) {
+    try {
+      matchVariables = JSON.parse(matchVariablesRaw);
+    } catch {
+      alert('Invalid match variables JSON');
+      return;
+    }
+  }
+
   try {
-    response = JSON.parse(responseStr);
+    response = JSON.parse(responseRaw);
   } catch {
     alert('Invalid JSON response');
     return;
   }
 
-  // Preserve enabled state if editing existing rule
-  const existingRule = mockRules[name];
-  mockRules[name] = {
+  const existingRule = editingRuleId ? mockRules[editingRuleId] : null;
+  const ruleId = editingRuleId || ruleUtils.createRuleId(operationName);
+  const now = Date.now();
+
+  mockRules[ruleId] = {
+    id: ruleId,
+    operationName,
     response,
     enabled: existingRule ? existingRule.enabled !== false : true,
-    delay
+    delay,
+    hasVariableMatcher,
+    matchVariables,
+    createdAt: existingRule?.createdAt || now,
+    updatedAt: now
   };
 
-  await chrome.runtime.sendMessage({
-    type: 'UPDATE_MOCK_RULES',
-    mockRules
-  });
-
-  operationNameInput.value = '';
-  mockResponseInput.value = '';
-  mockDelayInput.value = '';
-  editingRule = null;
-  addRuleBtn.textContent = 'Add Rule';
-  cancelEditBtn.style.display = 'none';
+  await persistMockRules();
+  resetRuleForm();
   renderRules();
 }
 
 // Toggle individual rule
-async function toggleRule(name, enabled) {
-  if (mockRules[name]) {
-    mockRules[name].enabled = enabled;
-
-    await chrome.runtime.sendMessage({
-      type: 'UPDATE_MOCK_RULES',
-      mockRules
-    });
-
-    renderRules();
+async function toggleRule(ruleId, enabled) {
+  if (!mockRules[ruleId]) {
+    return;
   }
+
+  mockRules[ruleId] = {
+    ...mockRules[ruleId],
+    enabled,
+    updatedAt: Date.now()
+  };
+
+  await persistMockRules();
+  renderRules();
 }
 
-// Edit rule - populate form with existing rule data
-function editRule(name) {
-  const rule = mockRules[name];
-  if (rule) {
-    operationNameInput.value = name;
-    mockResponseInput.value = JSON.stringify(rule.response, null, 2);
-    mockDelayInput.value = rule.delay || '';
-    editingRule = name;
-    addRuleBtn.textContent = 'Update Rule';
-    cancelEditBtn.style.display = 'inline-block';
-    // Scroll to form
-    operationNameInput.focus();
+// Edit rule
+function editRule(ruleId) {
+  const rule = mockRules[ruleId];
+
+  if (!rule) {
+    return;
   }
+
+  operationNameInput.value = rule.operationName;
+  enableVariableMatchInput.checked = Boolean(rule.hasVariableMatcher);
+  matchVariablesInput.value = rule.matchVariables === null || rule.matchVariables === undefined
+    ? ''
+    : JSON.stringify(rule.matchVariables, null, 2);
+  mockResponseInput.value = JSON.stringify(rule.response, null, 2);
+  mockDelayInput.value = rule.delay || '';
+  editingRuleId = ruleId;
+  addRuleBtn.textContent = 'Update Rule';
+  cancelEditBtn.style.display = 'inline-block';
+  syncVariableMatchState();
+  operationNameInput.focus();
+  switchTab('mock-rules');
 }
 
 // Cancel editing
 function cancelEdit() {
-  operationNameInput.value = '';
-  mockResponseInput.value = '';
-  mockDelayInput.value = '';
-  editingRule = null;
-  addRuleBtn.textContent = 'Add Rule';
-  cancelEditBtn.style.display = 'none';
+  resetRuleForm();
 }
 
 // Delete mock rule
-async function deleteRule(name) {
-  delete mockRules[name];
+async function deleteRule(ruleId) {
+  delete mockRules[ruleId];
 
-  await chrome.runtime.sendMessage({
-    type: 'UPDATE_MOCK_RULES',
-    mockRules
-  });
-
+  await persistMockRules();
   renderRules();
 }
 
@@ -347,10 +437,11 @@ async function clearRequests() {
 
 // Tab switching
 function switchTab(tabName) {
-  tabs.forEach(tab => {
+  tabs.forEach((tab) => {
     tab.classList.toggle('active', tab.dataset.tab === tabName);
   });
-  tabContents.forEach(content => {
+
+  tabContents.forEach((content) => {
     content.classList.toggle('active', content.id === `${tabName}-tab`);
   });
 }
@@ -365,7 +456,7 @@ async function copyToClipboard(text) {
   } catch {
     // navigator.clipboard.writeText fails in DevTools panel (e.g. "Document is not focused")
   }
-  // Fallback for extension contexts using execCommand
+
   const textArea = document.createElement('textarea');
   textArea.value = text;
   textArea.style.position = 'fixed';
@@ -374,6 +465,7 @@ async function copyToClipboard(text) {
   document.body.appendChild(textArea);
   textArea.focus();
   textArea.select();
+
   try {
     return document.execCommand('copy');
   } finally {
@@ -382,7 +474,10 @@ async function copyToClipboard(text) {
 }
 
 function escapeHtml(str) {
-  if (!str) return '';
+  if (!str) {
+    return '';
+  }
+
   return String(str)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -391,7 +486,10 @@ function escapeHtml(str) {
 }
 
 function formatJson(obj) {
-  if (obj === null || obj === undefined) return 'null';
+  if (obj === null || obj === undefined) {
+    return 'null';
+  }
+
   try {
     return escapeHtml(JSON.stringify(obj, null, 2));
   } catch {
@@ -400,33 +498,39 @@ function formatJson(obj) {
 }
 
 function formatTime(timestamp) {
-  if (!timestamp) return '';
-  const date = new Date(timestamp);
-  return date.toLocaleTimeString();
+  if (!timestamp) {
+    return '';
+  }
+
+  return new Date(timestamp).toLocaleTimeString();
 }
 
 // Resizable panels
 function makeResizable(resizerId, panelId) {
   const resizer = document.getElementById(resizerId);
   const panel = document.getElementById(panelId);
-  if (!resizer || !panel) return;
+
+  if (!resizer || !panel) {
+    return;
+  }
 
   let startX = 0;
   let startWidth = 0;
 
-  resizer.addEventListener('mousedown', (e) => {
-    startX = e.clientX;
+  resizer.addEventListener('mousedown', (event) => {
+    startX = event.clientX;
     startWidth = panel.offsetWidth;
     resizer.classList.add('dragging');
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
 
-    function onMouseMove(e) {
-      const delta = e.clientX - startX;
+    function onMouseMove(moveEvent) {
+      const delta = moveEvent.clientX - startX;
       const newWidth = Math.max(
-        parseInt(getComputedStyle(panel).minWidth) || 150,
+        parseInt(getComputedStyle(panel).minWidth, 10) || 150,
         startWidth + delta
       );
+
       panel.style.width = `${newWidth}px`;
     }
 
@@ -446,8 +550,7 @@ function makeResizable(resizerId, panelId) {
 makeResizable('requestsResizer', 'requestList');
 makeResizable('mockRulesResizer', 'addRuleForm');
 
-// Event listeners
-tabs.forEach(tab => {
+tabs.forEach((tab) => {
   tab.addEventListener('click', () => switchTab(tab.dataset.tab));
 });
 
@@ -455,6 +558,7 @@ mockingToggle.addEventListener('change', toggleMocking);
 clearBtn.addEventListener('click', clearRequests);
 addRuleBtn.addEventListener('click', addRule);
 cancelEditBtn.addEventListener('click', cancelEdit);
+enableVariableMatchInput.addEventListener('change', syncVariableMatchState);
 
-// Initialize
+syncVariableMatchState();
 init();

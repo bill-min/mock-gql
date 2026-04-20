@@ -1,6 +1,13 @@
 (function () {
   "use strict";
 
+  const ruleUtils = window.MockGQLRuleUtils;
+
+  if (!ruleUtils) {
+    console.error("[MockGQL] Mock rule utilities failed to load");
+    return;
+  }
+
   // Mock state
   let mockRules = {};
   let mockingEnabled = false;
@@ -9,11 +16,11 @@
   window.addEventListener("message", (event) => {
     if (event.source !== window) return;
     if (event.data.type === "MOCK_STATE_UPDATE") {
-      mockRules = event.data.mockRules || {};
+      mockRules = ruleUtils.normalizeMockRules(event.data.mockRules);
       mockingEnabled = event.data.mockingEnabled || false;
       console.log("[MockGQL] State updated:", {
         mockingEnabled,
-        rules: Object.keys(mockRules),
+        ruleCount: Object.keys(mockRules).length,
       });
     }
   });
@@ -73,15 +80,17 @@
   }
 
   // Check if request should be mocked
-  function getMockRule(operationName) {
+  function getMockRule(operationName, variables) {
     if (!mockingEnabled || !operationName) return null;
-    const rule = mockRules[operationName];
-    if (!rule) return null;
-    // Check if rule is enabled (new format: { response, enabled, delay })
-    if (rule.enabled === false) return null;
-    // Return full rule object
+
+    const rule = ruleUtils.getMatchingMockRule(mockRules, operationName, variables);
+
+    if (!rule) {
+      return null;
+    }
+
     return {
-      response: rule.response !== undefined ? rule.response : rule,
+      ...rule,
       delay: rule.delay || 0,
     };
   }
@@ -148,17 +157,19 @@
     const operations = Array.isArray(parsed) ? parsed : [parsed];
     const operationName = operations[0]?.operationName || "Unknown";
     const operationType = getOperationType(operations[0]?.query);
+    const variables = operations[0]?.variables;
 
     // Check for mock
+    const matchingRule = getMockRule(operationName, variables);
     console.log(
       "[MockGQL] Fetch:",
       operationName,
       "| Mocking:",
       mockingEnabled,
-      "| Has rule:",
-      !!mockRules[operationName],
+      "| Matched rule:",
+      matchingRule?.id || "none",
     );
-    const mockRule = getMockRule(operationName);
+    const mockRule = matchingRule;
     if (mockRule) {
       fireMarkerRequest(operationName, url);
       console.log(
@@ -166,15 +177,22 @@
         operationName,
         "| Delay:",
         mockRule.delay,
+        "| Match:",
+        ruleUtils.describeRuleMatch(mockRule, 120),
       );
       const responseData = {
         url,
         operationName,
         operationType,
         query: operations[0]?.query,
-        variables: operations[0]?.variables,
+        variables,
         response: mockRule.response,
         mocked: true,
+        mockRuleId: mockRule.id,
+        mockRuleMatch: ruleUtils.describeRuleMatch(mockRule, 120),
+        mockRuleMatchVariables: mockRule.hasVariableMatcher
+          ? mockRule.matchVariables
+          : null,
       };
       reportRequest(responseData);
 
@@ -202,7 +220,7 @@
             operationName,
             operationType,
             query: operations[0]?.query,
-            variables: operations[0]?.variables,
+            variables,
             response: responseBody,
             mocked: false,
           });
@@ -213,7 +231,7 @@
             operationName,
             operationType,
             query: operations[0]?.query,
-            variables: operations[0]?.variables,
+            variables,
             response: null,
             mocked: false,
           });
@@ -226,7 +244,7 @@
         operationName,
         operationType,
         query: operations[0]?.query,
-        variables: operations[0]?.variables,
+        variables,
         response: { error: error.message },
         mocked: false,
       });
@@ -260,17 +278,19 @@
     const operations = Array.isArray(parsed) ? parsed : [parsed];
     const operationName = operations[0]?.operationName || "Unknown";
     const operationType = getOperationType(operations[0]?.query);
+    const variables = operations[0]?.variables;
 
     // Check for mock
+    const matchingRule = getMockRule(operationName, variables);
     console.log(
       "[MockGQL] XHR:",
       operationName,
       "| Mocking:",
       mockingEnabled,
-      "| Has rule:",
-      !!mockRules[operationName],
+      "| Matched rule:",
+      matchingRule?.id || "none",
     );
-    const mockRule = getMockRule(operationName);
+    const mockRule = matchingRule;
     if (mockRule) {
       fireMarkerRequest(operationName, url);
       console.log(
@@ -278,15 +298,22 @@
         operationName,
         "| Delay:",
         mockRule.delay,
+        "| Match:",
+        ruleUtils.describeRuleMatch(mockRule, 120),
       );
       const responseData = {
         url,
         operationName,
         operationType,
         query: operations[0]?.query,
-        variables: operations[0]?.variables,
+        variables,
         response: mockRule.response,
         mocked: true,
+        mockRuleId: mockRule.id,
+        mockRuleMatch: ruleUtils.describeRuleMatch(mockRule, 120),
+        mockRuleMatchVariables: mockRule.hasVariableMatcher
+          ? mockRule.matchVariables
+          : null,
       };
       reportRequest(responseData);
 
@@ -323,7 +350,7 @@
           operationName,
           operationType,
           query: operations[0]?.query,
-          variables: operations[0]?.variables,
+          variables,
           response: responseBody,
           mocked: false,
         });
@@ -333,7 +360,7 @@
           operationName,
           operationType,
           query: operations[0]?.query,
-          variables: operations[0]?.variables,
+          variables,
           response: null,
           mocked: false,
         });

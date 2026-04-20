@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Conditional mock rules that only apply when the GraphQL variables match an optional JSON subset
+- Support for multiple mock rules per operation, with variable-specific rules taking priority over generic rules
+
 ## [1.1.0] - 2025-01-27
 
 ### Added

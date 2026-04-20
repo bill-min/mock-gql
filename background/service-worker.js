@@ -1,7 +1,7 @@
 // Store requests per tab
 const tabRequests = new Map();
 
-// Store mock rules (operation name -> mock response)
+// Store mock rules by rule ID
 let mockRules = {};
 let mockingEnabled = false;
 

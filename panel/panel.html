@@ -46,6 +46,18 @@
               <input type="text" id="operationName" placeholder="e.g., GetUser">
             </div>
             <div class="form-group">
+              <label class="toggle-switch">
+                <span class="toggle-label">Enable Variable Match</span>
+                <input type="checkbox" id="enableVariableMatch">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="form-group" id="variableMatchSection">
+              <label for="matchVariables">Match Variables (JSON subset)</label>
+              <textarea id="matchVariables" placeholder='{"id": "1"}'></textarea>
+              <div class="form-hint">Turn this on to match a deep JSON subset against the request variables. When it is off, the rule applies to every request for the operation.</div>
+            </div>
+            <div class="form-group">
               <label for="mockResponse">Mock Response (JSON)</label>
               <textarea id="mockResponse" placeholder='{"data": {"user": {"id": "1", "name": "Mock User"}}}'></textarea>
             </div>
@@ -68,6 +80,7 @@
     </div>
   </div>
 
+  <script src="../content/mock-rule-utils.js"></script>
   <script src="panel.js"></script>
 </body>
 </html>

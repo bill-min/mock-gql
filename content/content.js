@@ -1,8 +1,8 @@
-// Inject the interceptor script into the page context
-function injectScript() {
+// Inject a script into the page context
+function injectScript(path) {
   return new Promise((resolve) => {
     const script = document.createElement('script');
-    script.src = chrome.runtime.getURL('content/injected.js');
+    script.src = chrome.runtime.getURL(path);
     script.onload = function() {
       this.remove();
       resolve();
@@ -14,7 +14,8 @@ function injectScript() {
 // Initialize
 async function init() {
   // Wait for injected script to load
-  await injectScript();
+  await injectScript('content/mock-rule-utils.js');
+  await injectScript('content/injected.js');
 
   // Give the script a moment to set up listeners
   await new Promise(r => setTimeout(r, 10));

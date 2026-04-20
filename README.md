@@ -10,6 +10,7 @@ A Chrome DevTools extension to log and mock GraphQL requests.
 - **Request Logging** - Intercepts all GraphQL requests (fetch and XHR) and displays them in a dedicated DevTools panel
 - **Request Details** - View operation name, type (query/mutation), query, variables, and response for each request
 - **Mocking** - Create mock rules to return custom responses for specific operations
+- **Conditional Mocking** - Match a rule only when the GraphQL variables include a specific JSON subset
 - **Individual Rule Control** - Enable/disable individual mock rules with toggles
 - **Response Delay** - Add artificial latency to mocked responses for testing loading states
 - **Persistent Storage** - Mock rules are saved and persist across browser sessions
@@ -45,20 +46,23 @@ A Chrome DevTools extension to log and mock GraphQL requests.
 
 1. Click on a request in the list
 2. Click **Create Mock Rule** to pre-fill the form with the operation name and response
-3. Modify the response JSON as needed
-4. Optionally set a delay (in milliseconds) to simulate network latency
-5. Click **Add Rule**
+3. Optionally turn on **Enable Variable Match** and add **Match Variables** JSON to only mock requests whose variables include that subset
+4. Modify the response JSON as needed
+5. Optionally set a delay (in milliseconds) to simulate network latency
+6. Click **Add Rule**
 
 ### Managing Mock Rules
 
 - **Enable Mock** toggle (top right) - Master switch to enable/disable all mocking
 - **Individual toggles** - Enable/disable specific rules without deleting them
 - **Edit** - Modify an existing rule's response or delay
+- **Match Variables** - Add an optional JSON subset such as `{"id":"1"}` or `{"input":{"id":"1"}}` to target specific requests
 - **Delete** - Remove a rule entirely
 
 ### Tips
 
 - The operation name must match exactly (case-sensitive)
+- Variable matching is a deep subset match: a rule with `{"input":{"id":"1"}}` matches any request whose variables include that nested value
 - Mock rules persist in Chrome storage, so they survive browser restarts
 - Use the delay feature to test loading states and race conditions
 - Disabled rules appear dimmed but are preserved for later use
@@ -74,6 +78,7 @@ mock-gql/
 │   └── service-worker.js   # Background service worker
 ├── content/
 │   ├── content.js          # Content script (bridge)
+│   ├── mock-rule-utils.js  # Shared rule normalization and matching helpers
 │   └── injected.js         # Script injected into page context
 ├── panel/
 │   ├── panel.html          # DevTools panel UI
